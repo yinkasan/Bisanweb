@@ -1,0 +1,18 @@
+# Supabase CLI configuration for the Depot Manager edge functions.
+#
+# If you already ran `supabase init` in this repo, merge the [functions.*]
+# blocks below into your generated file instead of replacing it.
+
+project_id = "depot-manager"
+
+[functions.mobile-api]
+# The function authenticates every request itself with the app's own JWT
+# (Authorization: Bearer ... issued by /auth/login), so the platform-level
+# Supabase JWT check is disabled. Tokens are interchangeable with the
+# Express API because both sign with the same JWT_SECRET.
+verify_jwt = false
+
+[functions.alerts-worker]
+# Protected by a shared CRON_SECRET header instead of a Supabase JWT, because
+# it is invoked by a scheduled database job (pg_cron + pg_net).
+verify_jwt = false

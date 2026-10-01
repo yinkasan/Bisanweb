@@ -1,0 +1,25 @@
+{
+  "name": "depot-management-system",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Multi-Depot Financial and Operations Management System",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "db:start": "npm run db:start -w server",
+    "db:init": "npm run db:init -w server",
+    "migrate": "npm run migrate -w server",
+    "seed": "npm run seed -w server",
+    "seed:demo": "npm run seed:demo -w server",
+    "db:push": "npm run migrate -w server && npm run seed -w server",
+    "dev:server": "npm run dev -w server",
+    "dev:client": "npm run dev -w client",
+    "test:acceptance": "npm run test:acceptance -w server",
+    "build": "npm run build -w client"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}
