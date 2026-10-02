@@ -253,6 +253,18 @@ export async function requireUser(req: Request): Promise<UserContext> {
   return await loadUserContext(payload.uid);
 }
 
+/**
+ * Like requireUser but returns null instead of throwing — for best-effort
+ * auditing on endpoints that work for anonymous/expired sessions (logout).
+ */
+export async function optionalUser(req: Request): Promise<UserContext | null> {
+  try {
+    return await requireUser(req);
+  } catch {
+    return null;
+  }
+}
+
 export function hasPermission(
   ctx: UserContext,
   pageKey: string,

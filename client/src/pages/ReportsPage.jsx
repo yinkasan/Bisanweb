@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { api, qs } from '../api/client.js';
+import { api, downloadFile, qs } from '../api/client.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { Button, Card, ErrorText, Field, Input, PageHeader, Select, Spinner, Table } from '../components/ui.jsx';
 import { date, dateTime, money, monthStartISO, todayISO } from '../utils/format.js';
@@ -59,7 +59,8 @@ export default function ReportsPage() {
   const selected = catalog.find((r) => r.kind === kind);
 
   const exportCsv = () => {
-    window.open(`/api/reports/${kind}${qs({ ...filters, format: 'csv' })}`, '_blank');
+    // Authenticated blob download — window.open cannot send the bearer header.
+    downloadFile(`/reports/${kind}${qs({ ...filters, format: 'csv' })}`, `${kind}.csv`).catch(setError);
   };
 
   const renderCell = (col, row) => {

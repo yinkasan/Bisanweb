@@ -53,13 +53,23 @@ export function optionalDate(value: unknown, fieldName = 'date'): string | null 
   return requireDate(value, fieldName);
 }
 
-/** Parses a monetary amount: numeric, non-negative, greater than zero. */
-export function requireAmount(value: unknown, fieldName = 'amount'): string {
+/** Parses a monetary amount: numeric, non-negative, greater than zero (unless allowZero). */
+export function requireAmount(value: unknown, fieldName = 'amount', allowZero = false): string {
   const n = typeof value === 'number' ? value : Number(String(value ?? '').trim());
   if (!Number.isFinite(n)) throw new HttpError(400, `${fieldName} must be a number`);
   if (n < 0) throw new HttpError(400, `${fieldName} must not be negative`);
-  if (n === 0) throw new HttpError(400, `${fieldName} must be greater than zero`);
+  if (!allowZero && n === 0) throw new HttpError(400, `${fieldName} must be greater than zero`);
   return n.toFixed(2);
+}
+
+/** Validates a non-empty trimmed string with a maximum length. */
+export function requireString(value: unknown, fieldName = 'value', max = 500): string {
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new HttpError(400, `${fieldName} is required`);
+  }
+  const v = value.trim();
+  if (v.length > max) throw new HttpError(400, `${fieldName} must be at most ${max} characters`);
+  return v;
 }
 
 export function optionalString(value: unknown, max = 2000): string | null {

@@ -89,7 +89,7 @@ export async function depotMetrics(depotId: number, from: string, to: string): P
        (SELECT COALESCE(SUM(amount),0) FROM depot_expenses    WHERE depot_id=$1 AND status='posted' AND transaction_date <= $3) AS expenses_to_date,
        (SELECT stock_value FROM stock_value_records WHERE depot_id=$1 AND status='posted' AND transaction_date <= $3
          ORDER BY transaction_date DESC LIMIT 1) AS stock_value,
-       (SELECT transaction_date FROM stock_value_records WHERE depot_id=$1 AND status='posted' AND transaction_date <= $3
+       (SELECT transaction_date::text FROM stock_value_records WHERE depot_id=$1 AND status='posted' AND transaction_date <= $3
          ORDER BY transaction_date DESC LIMIT 1) AS stock_value_date,
        (SELECT stock_value FROM stock_value_records WHERE depot_id=$1 AND status='posted' AND transaction_date < $2
          ORDER BY transaction_date DESC LIMIT 1) AS previous_stock_value`,
@@ -146,4 +146,78 @@ export async function cashAtBank(): Promise<string> {
     `SELECT value FROM system_settings WHERE key = 'cash_at_bank'`,
   );
   return row ? money(row.value) : '0.00';
+}
+
+export async function depotDailySeries(depotId: number, from: string, to: string) {
+  return await query(
+    `SELECT transaction_date, cash_sales, pos_sales, credit_sales, total_sales,
+            supplier_purchases, expenses, operating_balance
+       FROM depot_daily_balances
+      WHERE depot_id = $1 AND transaction_date BETWEEN $2 AND $3
+      ORDER BY transaction_date`,
+    [depotId, from, to],
+  );
+}
+
+export async function depotInfo(depotId: number) {
+  return await queryOne<Record<string, unknown>>(
+    'SELECT id, code, name, location FROM depots WHERE id = $1',
+    [depotId],
+  );
+}
+
+/** Customers with a non-zero balance as of `to` (dashboard drill-down). */
+export async function customersWithBalances(depotIds: number[], to: string) {
+  const rows = await query<Record<string, unknown>>(
+    `SELECT c.id, c.code, c.name, c.depot_id, d.code AS depot_code,
+            COALESCE((SELECT SUM(amount) FROM credit_sales WHERE customer_id=c.id AND status='posted' AND transaction_date <= $2),0)
+          - COALESCE((SELECT SUM(amount) FROM customer_payments WHERE customer_id=c.id AND status='posted' AND transaction_date <= $2),0) AS balance
+       FROM customers c JOIN depots d ON d.id = c.depot_id
+      WHERE c.depot_id = ANY($1::int[])
+      ORDER BY balance DESC, c.name`,
+    [depotIds, to],
+  );
+  return rows.filter((r) => Number(r.balance) !== 0);
+}
+
+/** Suppliers with a non-zero debt as of `to` (dashboard drill-down). */
+export async function suppliersWithDebts(depotIds: number[], to: string) {
+  const rows = await query<Record<string, unknown>>(
+    `SELECT s.id, s.code, s.name, s.depot_id, d.code AS depot_code,
+            COALESCE((SELECT SUM(amount) FROM supplier_purchases WHERE supplier_id=s.id AND status='posted' AND transaction_date <= $2),0)
+          - COALESCE((SELECT SUM(amount) FROM supplier_payments WHERE supplier_id=s.id AND status='posted' AND transaction_date <= $2),0) AS debt
+       FROM suppliers s JOIN depots d ON d.id = s.depot_id
+      WHERE s.depot_id = ANY($1::int[])
+      ORDER BY debt DESC, s.name`,
+    [depotIds, to],
+  );
+  return rows.filter((r) => Number(r.debt) !== 0);
+}
+
+/** Sales component entries for the "Total Depot Sales" drill-down (SRS §36). */
+export async function salesBreakdown(depotId: number, from: string, to: string) {
+  const cols = 'id, transaction_date, amount, reference, status, entry_date, entry_time, entered_by_name';
+  const cash = await query<Record<string, unknown>>(
+    `SELECT ${cols} FROM cash_sales WHERE depot_id=$1 AND transaction_date BETWEEN $2 AND $3 ORDER BY transaction_date DESC, id DESC LIMIT 100`,
+    [depotId, from, to],
+  );
+  const pos = await query<Record<string, unknown>>(
+    `SELECT ${cols} FROM pos_sales WHERE depot_id=$1 AND transaction_date BETWEEN $2 AND $3 ORDER BY transaction_date DESC, id DESC LIMIT 100`,
+    [depotId, from, to],
+  );
+  const credit = await query<Record<string, unknown>>(
+    `SELECT cs.id, cs.transaction_date, cs.amount, cs.reference, cs.status,
+            cs.entry_date, cs.entry_time, cs.entered_by_name, c.name AS customer_name, c.code AS customer_code
+       FROM credit_sales cs JOIN customers c ON c.id = cs.customer_id
+      WHERE cs.depot_id=$1 AND cs.transaction_date BETWEEN $2 AND $3
+      ORDER BY cs.transaction_date DESC, cs.id DESC LIMIT 100`,
+    [depotId, from, to],
+  );
+  const sum = (rows: Record<string, unknown>[]) =>
+    rows.filter((r) => r.status === 'posted').reduce((a, r) => a + Number(r.amount), 0);
+  return {
+    cash_sales: { total: money(sum(cash)), entries: cash },
+    pos_sales: { total: money(sum(pos)), entries: pos },
+    credit_sales: { total: money(sum(credit)), entries: credit },
+  };
 }

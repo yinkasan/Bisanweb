@@ -5,6 +5,12 @@
 
 project_id = "depot-manager"
 
+[functions.api]
+# The web API replaces the Express server. It authenticates every request
+# itself with the app's own JWT (Authorization: Bearer ... issued by
+# /auth/login), so the platform-level Supabase JWT check is disabled.
+verify_jwt = false
+
 [functions.mobile-api]
 # The function authenticates every request itself with the app's own JWT
 # (Authorization: Bearer ... issued by /auth/login), so the platform-level

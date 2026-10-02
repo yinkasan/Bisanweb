@@ -8,7 +8,8 @@ export const corsHeaders: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers':
     'authorization, x-client-info, apikey, content-type, x-cron-secret',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  // PUT/DELETE are used by the `api` function's admin and account routes.
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
 };
 
 /** Error carrying an HTTP status; mapped to a JSON response at the router. */

@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { api, ApiError } from '../api/client.js';
+import { api, ApiError, clearToken, getToken } from '../api/client.js';
 
 const AuthContext = createContext(null);
 
@@ -16,6 +16,13 @@ export function AuthProvider({ children }) {
   const [idleMinutes, setIdleMinutes] = useState(null);
 
   const refresh = useCallback(async () => {
+    // Without a stored bearer token there is nothing to validate — skip the
+    // round trip and land on the sign-in screen.
+    if (!getToken()) {
+      setUser(null);
+      setLoading(false);
+      return null;
+    }
     try {
       const data = await api.get('/auth/me');
       setUser(data.user);
@@ -36,6 +43,8 @@ export function AuthProvider({ children }) {
   useEffect(() => { refresh(); }, [refresh]);
 
   const login = useCallback(async (username, password) => {
+    // client.js persists `data.token` (localStorage) from this response; every
+    // later call is signed with it as Authorization: Bearer.
     const data = await api.post('/auth/login', { username, password });
     setUser(data.user);
     setIdleMinutes(data.policy?.sessionIdleMinutes ?? null);
@@ -44,6 +53,7 @@ export function AuthProvider({ children }) {
 
   const logout = useCallback(async () => {
     try { await api.post('/auth/logout'); } catch { /* best effort */ }
+    clearToken();
     setUser(null);
   }, []);
 

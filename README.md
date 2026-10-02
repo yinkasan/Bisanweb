@@ -1,122 +1,132 @@
 # Multi-Depot Financial & Operations Management System
 
-A complete multi-depot management platform: React web app, Express API, PostgreSQL
-(Supabase-ready), Supabase Edge Functions, and a Flutter mobile app — all sharing
-one database, one permission model, and one authentication scheme.
+A complete multi-depot management platform: React web app on Vercel, Supabase
+Edge Functions API, Supabase (PostgreSQL) database, and a Flutter mobile app —
+all sharing one database, one permission model, and one authentication scheme.
 
 ```
 Depot/
-├── server/     Express API + PostgreSQL access layer + migrations/seed
-├── client/     React 19 + Vite + Tailwind web application
+├── client/     React 19 + Vite + Tailwind web application (deployed to Vercel)
 ├── mobile/     Flutter app (Android, iOS, web)
-└── supabase/   Edge Functions (mobile-api, alerts-worker) + config
+├── supabase/   Edge Functions (api, mobile-api, alerts-worker) + migrations + seed
+└── scripts/    smoke.mjs — end-to-end checks against the deployed api function
 ```
+
+There is **no application server** anymore: every former Express endpoint is
+served by the `api` edge function, so the web client is a static build and the
+backend scales with Supabase's function infrastructure.
 
 ---
 
-## 1. Quickstart (local, zero external services)
+## 1. Quickstart (local development)
 
-Requires Node.js 20+.
-
-```bash
-npm install                 # installs server + client workspaces
-npm run db:start            # boots an embedded PostgreSQL on port 5433 (first run downloads it)
-npm run dev:server          # API on http://localhost:4000
-npm run dev:client          # web app on http://localhost:5173
-```
-
-On first boot the server applies migrations, the base seed, and the bootstrap
-administrator automatically. To load rich demo data (users, depots, customers,
-suppliers, sales, payments, expenses):
+Requires Node.js 20+ and the deployed edge functions (see §3) — or Docker +
+`supabase functions serve api` for a fully local loop.
 
 ```bash
-npm run seed:demo
+npm install                          # installs the client workspace
+Copy-Item client\.env.example client\.env.local   # points the app at the deployed api function
+npm run dev                          # web app on http://localhost:5173
 ```
+
+The web app talks straight to `VITE_API_URL` (the deployed `api` function);
+CORS is open on the function, so no proxy is needed.
 
 ### Demo logins
 
 | Username     | Password     | Role                    | Depots        |
 | ------------ | ------------ | ----------------------- | ------------- |
 | `superadmin` | `Admin@2026` | Super Administrator     | all           |
-| `admin`      | `Demo@2026`  | Depot Administrator     | ABU, BIS      |
-| `sales1`     | `Demo@2026`  | Sales Representative    | ABU           |
-| `staff1`     | `Demo@2026`  | Staff (stock/expenses)  | ABU           |
+
+Change this password after first login. (The old demo users came from the
+local `seed:demo` data set, which was retired along with the local database.)
 
 ---
 
-## 2. Using Supabase as the database
+## 2. Database: Supabase
 
-The app talks plain PostgreSQL, so Supabase is a connection-string change.
+The database is the hosted Supabase project (`cayshvamuqdlhmkspjwq`); the
+schema lives in `supabase/migrations/*.sql` and the baseline data in
+`supabase/seed.sql` (roles, permission catalogue, expense categories, system
+settings, depots, bootstrap Super Admin — all idempotent).
 
-1. Create a project at [supabase.com](https://supabase.com) and copy the
-   **Session pooler** connection string
-   (Project Settings → Database → Connection string).
-2. Put it in `server/.env` (copy from `server/.env.example`):
+Against a fresh project:
 
-   ```env
-   DATABASE_URL=postgresql://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
-   JWT_SECRET=<same secret used by the edge functions>
-   ```
+```bash
+supabase link --project-ref <project-ref>
+supabase db push            # applies supabase/migrations
+psql "$DATABASE_URL" -f supabase/seed.sql   # baseline seed
+```
 
-   TLS is detected automatically for Supabase hosts; URL-encode special
-   characters in the password (`@` → `%40`).
-3. Push the schema and seed:
-
-   ```bash
-   npm run db:push       # migrations + base seed (idempotent)
-   npm run seed:demo     # optional demo data
-   ```
-
-The API then runs against Supabase with no code changes. Because authentication
-is stateless JWT, the same `JWT_SECRET` lets the edge functions, the Express
-API, and both clients accept each other's tokens.
+The production database already has this schema applied. If you add migration
+files, record them on the remote with `supabase migration repair` so the CLI's
+history table stays in sync.
 
 ---
 
 ## 3. Supabase Edge Functions
 
-Two Deno functions live in `supabase/functions/`:
+Three Deno functions live in `supabase/functions/`:
 
-- **`mobile-api`** — REST backend for the Flutter app (login, dashboards,
-  cash/credit sales, customers, ledger, notifications).
+- **`api`** — the full web API (auth, users, roles, depots, settings,
+  notifications, audit trail, reports + CSV, dashboards, customers/suppliers,
+  the seven financial flow pages, stock value). The Express server's exact
+  endpoints, payloads and error envelopes over bearer-token transport.
+- **`mobile-api`** — REST backend for the Flutter app.
 - **`alerts-worker`** — scheduled idempotent sweep that raises debt-threshold
   notifications (run via pg_cron + pg_net).
 
-Deploy, set secrets, and schedule both by following
-[`supabase/functions/README.md`](supabase/functions/README.md). Summary:
+Deploy and set secrets (secrets are shared project-wide, so mobile-api's
+existing values already cover `api` — verify with `supabase secrets list`):
 
 ```bash
-supabase link --project-ref <project-ref>
-supabase secrets set DATABASE_URL="postgresql://..." JWT_SECRET="..." CRON_SECRET="..."
-supabase functions deploy mobile-api alerts-worker
+supabase link --project-ref cayshvamuqdlhmkspjwq
+supabase secrets set DATABASE_URL="postgresql://...pooler...:5432/postgres" \
+                    JWT_SECRET="<the app's HS256 secret>" \
+                    APP_TIMEZONE="Africa/Lagos"
+supabase functions deploy api
+```
+
+`JWT_SECRET` must be identical across the `api` function, `mobile-api`, and the
+Flutter app — the same token is accepted by all three.
+
+Local loop (requires Docker):
+
+```bash
+supabase functions serve api      # http://localhost:54321/functions/v1/api
 ```
 
 Type-check locally anytime with:
 
 ```bash
-npx --yes -p typescript@5.6.3 tsc --noEmit -p supabase/tsconfig.json
+npm run typecheck    # tsc --noEmit -p supabase/tsconfig.json
 ```
 
 ---
 
-## 4. Flutter mobile app
+## 4. Web deployment (Vercel)
 
-Requires the Flutter SDK. The app works against either backend (Express or the
-`mobile-api` edge function) — the response contracts are identical.
+The client is a pure static SPA.
+
+1. Import the repo on Vercel; framework preset **Vite**.
+2. Root Directory: `client` (build command `npm run build`, output `client/dist`).
+   `client/vercel.json` already contains the SPA rewrite.
+3. Environment variable `VITE_API_URL` =
+   `https://<project-ref>.supabase.co/functions/v1/api` (production **and**
+   preview).
+4. No backend env vars are needed — the function API is open-CORS by design
+   and authenticated by the app JWT.
+
+---
+
+## 5. Flutter mobile app
+
+Requires the Flutter SDK. The app works against either backend (the `api` or
+the `mobile-api` edge function) — the response contracts are identical.
 
 ```bash
 cd mobile
 flutter pub get
-flutter run                                   # Android emulator -> http://10.0.2.2:4000/api
-```
-
-Point it at a different backend with `--dart-define`:
-
-```bash
-# Physical device on your LAN (replace with your machine's IP)
-flutter run --dart-define=API_BASE_URL=http://192.168.1.20:4000/api
-
-# Deployed Supabase edge function
 flutter run --dart-define=API_BASE_URL=https://<project-ref>.supabase.co/functions/v1/mobile-api
 ```
 
@@ -125,48 +135,50 @@ and laptops (navigation rail, wider grids) with a single codebase.
 
 ---
 
-## 5. Concurrent multi-user & mobile/laptop usage
+## 6. Concurrent multi-user & session model
 
-- **Stateless JWT auth** — no server-side sessions, so any number of users,
-  devices, and backend instances (Express or edge) can serve simultaneously.
-  Web uses an httpOnly cookie; mobile and scripts use
-  `Authorization: Bearer <token>` (returned by `POST /api/auth/login`).
-- **Connection pooling** — the server pool defaults to 10 connections
-  (`DB_POOL_MAX`), short-lived queries, `connectionTimeoutMillis: 15000`.
-  Edge functions use postgres.js with `prepare: false`, which is required for
-  Supabase Supavisor transaction pooling.
-- **Multi-origin CORS** — set `CLIENT_ORIGIN` to a comma-separated list to
-  serve several web origins (e.g. LAN laptop + localhost) from one API.
-- **Responsive web** — mobile drawer navigation, overflow-safe tables,
-  touch-sized inputs (`text-base` on mobile to prevent iOS zoom), adaptable
-  modals and filters. Works from a 360 px phone to a wide desktop.
-- **All state lives in PostgreSQL** — atomic transactions via `withTransaction`,
-  server-generated timestamps in the app timezone, and a complete audit trail
-  so concurrent edits stay traceable.
+- **Stateless JWT auth** — no server-side sessions. All clients (web, mobile,
+  scripts) send `Authorization: Bearer <token>` issued by `POST /auth/login`;
+  the web stores it in `localStorage` (`depot_token`) and clears it on 401.
+- **Session policy** — the idle sign-out window (`session_idle_minutes`) is
+  delivered with login and every `/auth/me` refresh; clients enforce it.
+- **Connection pooling** — edge functions use postgres.js with
+  `prepare: false`, which is required for Supabase Supavisor transaction
+  pooling.
+- **All state lives in PostgreSQL** — atomic transactions via
+  `withTransaction`, server-generated timestamps in the app timezone, and a
+  complete audit trail so concurrent edits stay traceable.
 
 ---
 
-## 6. Verification
+## 7. Verification
 
 ```bash
-npm run test:acceptance   # SRS section 41 acceptance tests
-node server/scripts/smoke.js   # HTTP smoke tests (21 checks, incl. bearer auth)
-npm run build             # client production build
+npm run typecheck       # edge functions compile
+npm run build           # client production build
+npm run smoke           # ~30 end-to-end checks against the deployed api function
 cd mobile && flutter analyze   # mobile static analysis
 ```
 
+Override the smoke target/credentials with `API_URL`, `SMOKE_USERNAME`,
+`SMOKE_PASSWORD` env vars.
+
 ---
 
-## 7. Environment reference (`server/.env`)
+## 8. Environment reference
 
-| Variable                    | Default                  | Purpose                                   |
-| --------------------------- | ------------------------ | ----------------------------------------- |
-| `DATABASE_URL`              | embedded local Postgres  | Supabase or any Postgres                  |
-| `DB_SSL`                    | auto for Supabase        | force TLS on/off                          |
-| `DB_POOL_MAX`               | `10`                     | pool size under concurrent load           |
-| `PORT`                      | `4000`                   | API port                                  |
-| `CLIENT_ORIGIN`             | `http://localhost:5173`  | comma-separated allowed web origins       |
-| `JWT_SECRET`                | dev default              | sign tokens — keep identical on edge      |
-| `JWT_EXPIRES_IN`            | `12h`                    | token lifetime                            |
-| `BOOTSTRAP_ADMIN_USERNAME`  | `superadmin`             | first admin (created when users empty)    |
-| `BOOTSTRAP_ADMIN_PASSWORD`  | `Admin@2026`             | first admin password                      |
+Client (`client/.env.local`, build-time):
+
+| Variable       | Default                                                       | Purpose                    |
+| -------------- | ------------------------------------------------------------- | -------------------------- |
+| `VITE_API_URL` | `https://cayshvamuqdlhmkspjwq.supabase.co/functions/v1/api`   | deployed api function URL  |
+
+Edge function secrets (project-wide, via `supabase secrets set`):
+
+| Variable        | Purpose                                            |
+| --------------- | -------------------------------------------------- |
+| `DATABASE_URL`  | Supabase pooler connection string                  |
+| `JWT_SECRET`    | HS256 signing secret (shared: web, api, mobile)    |
+| `JWT_EXPIRES_IN`| Token lifetime, default `12h`                      |
+| `APP_TIMEZONE`  | `Africa/Lagos` — entry stamps and daily rollover   |
+| `CRON_SECRET`   | alerts-worker shared secret                        |
